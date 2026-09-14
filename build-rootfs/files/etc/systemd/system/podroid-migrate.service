@@ -1,0 +1,9 @@
+[Unit]
+Description=Podroid system migrations
+After=local-fs.target
+Before=podroid-bootstrap.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/podroid/service-runner /usr/local/lib/podroid/services/podroid-migrate start
+RemainAfterExit=yes
