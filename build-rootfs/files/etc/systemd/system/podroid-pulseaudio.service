@@ -1,0 +1,15 @@
+[Unit]
+Description=Podroid desktop audio server
+Requires=podroid-bootstrap.service
+After=podroid-bootstrap.service
+Before=podroid-ready.service
+
+[Service]
+Type=simple
+Environment=PULSE_RUNTIME_PATH=/run/podroid-pulse
+Environment=XDG_RUNTIME_DIR=/run/podroid-pulse
+ExecStartPre=/bin/mkdir -p /run/podroid-pulse
+ExecStart=/usr/bin/pulseaudio --daemonize=no --disallow-exit --exit-idle-time=-1 --load="module-null-sink sink_name=podroid_sink rate=44100 channels=2 format=s16le" --load="module-simple-protocol-tcp source=podroid_sink.monitor record=true rate=44100 format=s16le channels=2 listen=0.0.0.0 port=4713" --load=module-native-protocol-unix
+Restart=on-failure
+RestartSec=1
+OOMScoreAdjust=-1000
