@@ -1,0 +1,36 @@
+#!/bin/sh
+set -u
+
+SERVICE=${1:?service path required}
+ACTION=${2:-start}
+
+ebegin() { printf ' * %s\n' "$*"; }
+einfo()  { printf ' * %s\n' "$*"; }
+ewarn()  { printf ' * WARNING: %s\n' "$*" >&2; }
+eerror() { printf ' * ERROR: %s\n' "$*" >&2; }
+eend() {
+    _rc=${1:-0}
+    shift 2>/dev/null || true
+    if [ "$_rc" -ne 0 ]; then
+        ewarn "${*:-service failed}"
+    fi
+    return "$_rc"
+}
+mark_service_inactive() { return 0; }
+
+# Source only Podroid's bundled service bodies.
+# shellcheck disable=SC1090
+. "$SERVICE"
+
+case "$ACTION" in
+    start)
+        if command -v start >/dev/null 2>&1; then start; fi
+        ;;
+    stop)
+        if command -v stop >/dev/null 2>&1; then stop; fi
+        ;;
+    *)
+        echo "unsupported action: $ACTION" >&2
+        exit 2
+        ;;
+esac
