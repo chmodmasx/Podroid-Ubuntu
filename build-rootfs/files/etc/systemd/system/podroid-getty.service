@@ -1,0 +1,14 @@
+[Unit]
+Description=Podroid interactive console
+After=podroid-ready.service
+Requires=podroid-ready.service
+Conflicts=getty@hvc0.service serial-getty@hvc0.service
+
+[Service]
+Type=idle
+ExecStart=-/usr/local/bin/podroid-getty hvc0
+Restart=always
+RestartSec=0
+
+[Install]
+WantedBy=podroid.target
