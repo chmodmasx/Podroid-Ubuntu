@@ -215,7 +215,7 @@ run_boot_test() {
     console=$(adb shell run-as "$pkg" cat files/console.log 2>/dev/null || echo "")
     
     local errors=0
-    local checks=("Loading kernel modules" "Configuring containers" "IP:" "Ready!")
+    local checks=("Loading kernel modules" "Configuring containers" "Network found" "Ready!")
     for check in "${checks[@]}"; do
         if echo "$console" | grep -q "$check"; then
             success "Check passed: $check"
