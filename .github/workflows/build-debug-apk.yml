@@ -11,7 +11,7 @@ on:
 jobs:
   build-apk:
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 90
 
     steps:
       - name: Checkout
@@ -29,26 +29,61 @@ jobs:
           java-version: '17'
           cache: gradle
 
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android build dependencies
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platforms;android-36.1' 'build-tools;36.0.0' 'ndk;27.2.12479018'
+
       - name: Make build scripts executable
         run: chmod +x gradlew build-all.sh init-podroid
 
-      - name: Build kernel and initramfs
-        run: ./build-all.sh initramfs
+      - name: Reuse unchanged upstream v1.2.8 VM binaries
+        run: |
+          set -euxo pipefail
+          curl -L --fail --retry 3 \
+            -o /tmp/podroid-upstream.apk \
+            https://github.com/ExTV/Podroid/releases/download/v1.2.8/Podroid-v1.2.8-release.apk
+
+          mkdir -p app/src/main/assets/qemu app/src/main/jniLibs/arm64-v8a /tmp/podroid-upstream
+
+          unzip -p /tmp/podroid-upstream.apk assets/vmlinuz-virt > app/src/main/assets/vmlinuz-virt
+          unzip -p /tmp/podroid-upstream.apk assets/initrd.img > app/src/main/assets/initrd.img
+
+          unzip -q /tmp/podroid-upstream.apk 'assets/qemu/*' -d /tmp/podroid-upstream
+          cp -a /tmp/podroid-upstream/assets/qemu/. app/src/main/assets/qemu/
+
+          for lib in \
+            libqemu-system-aarch64.so \
+            libslirp.so \
+            libpodroid-bridge.so \
+            libpodroid-launcher.so; do
+            unzip -p /tmp/podroid-upstream.apk "lib/arm64-v8a/$lib" \
+              > "app/src/main/jniLibs/arm64-v8a/$lib"
+          done
+
+          test -s app/src/main/assets/vmlinuz-virt
+          test -s app/src/main/assets/initrd.img
+          test -s app/src/main/jniLibs/arm64-v8a/libqemu-system-aarch64.so
 
       - name: Build Ubuntu rootfs
         run: ./build-all.sh rootfs
 
-      - name: Build QEMU and Android native helpers
-        run: ./build-all.sh qemu
-
       - name: Build debug APK
         run: ./gradlew --no-daemon assembleDebug
 
-      - name: Validate APK
+      - name: Validate APK contents
         run: |
-          test -s app/build/outputs/apk/debug/app-debug.apk
-          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q 'assets/alpine-rootfs.squashfs'
-          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q 'lib/arm64-v8a/libqemu-system-aarch64.so'
+          set -euxo pipefail
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          unzip -l "$APK" | grep -q 'assets/alpine-rootfs.squashfs'
+          unzip -l "$APK" | grep -q 'assets/vmlinuz-virt'
+          unzip -l "$APK" | grep -q 'assets/initrd.img'
+          unzip -l "$APK" | grep -q 'lib/arm64-v8a/libqemu-system-aarch64.so'
+          unzip -l "$APK" | grep -q 'lib/arm64-v8a/libpodroid-bridge.so'
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
