@@ -1,0 +1,13 @@
+[Unit]
+Description=Podroid X11 VNC server
+Requires=podroid-bootstrap.service
+After=podroid-bootstrap.service podroid-network.service
+Before=podroid-ready.service
+
+[Service]
+Type=simple
+ExecStartPre=/bin/sh -c 'rm -f /tmp/.X0-lock /tmp/.X11-unix/X0; mkdir -p /tmp/.X11-unix'
+ExecStart=/bin/sh -c 'dpi=$(sed -n "s/.*podroid\\.x11\\.dpi=\\([0-9]*\\).*/\\1/p" /proc/cmdline); [ -n "$dpi" ] || dpi=96; exec /usr/bin/Xtigervnc :0 -geometry 1280x720 -depth 24 -SecurityTypes None -localhost no -rfbport 5900 -AlwaysShared -dpi "$dpi" -AcceptSetDesktopSize'
+Restart=on-failure
+RestartSec=1
+OOMScoreAdjust=-1000
