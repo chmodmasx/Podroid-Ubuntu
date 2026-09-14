@@ -1,0 +1,59 @@
+name: Ubuntu rootfs
+
+on:
+  pull_request:
+    paths:
+      - 'build-rootfs/**'
+      - 'init-podroid'
+      - 'build-all.sh'
+      - '.github/workflows/ubuntu-rootfs.yml'
+  workflow_dispatch:
+
+jobs:
+  build-rootfs:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable ARM64 emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Enable Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Ubuntu guest rootfs
+        run: |
+          mkdir -p /tmp/podroid-rootfs
+          docker buildx build \
+            --progress=plain \
+            -f build-rootfs/Dockerfile.rootfs \
+            --build-arg SYSTEM_VERSION=0 \
+            --output type=local,dest=/tmp/podroid-rootfs \
+            build-rootfs
+
+      - name: Inspect SquashFS
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y squashfs-tools
+          test -s /tmp/podroid-rootfs/alpine-rootfs.squashfs
+          rm -rf /tmp/podroid-rootfs/unpacked
+          unsquashfs -d /tmp/podroid-rootfs/unpacked /tmp/podroid-rootfs/alpine-rootfs.squashfs
+          grep -q '^ID=ubuntu$' /tmp/podroid-rootfs/unpacked/etc/os-release
+          grep -q '^VERSION_ID="26.04"$' /tmp/podroid-rootfs/unpacked/etc/os-release
+          grep -q '^ubuntu-26.04$' /tmp/podroid-rootfs/unpacked/etc/podroid/rootfs-id
+          test -x /tmp/podroid-rootfs/unpacked/sbin/init
+          test -f /tmp/podroid-rootfs/unpacked/etc/systemd/system/podroid.target
+          test -x /tmp/podroid-rootfs/unpacked/usr/local/bin/podroid-hostd
+          test -x /tmp/podroid-rootfs/unpacked/usr/local/bin/podroid-vsock-agent
+          test -x /tmp/podroid-rootfs/unpacked/usr/bin/podman
+          test -x /tmp/podroid-rootfs/unpacked/usr/bin/docker
+
+      - name: Validate shell syntax
+        run: |
+          bash -n build-all.sh
+          sh -n init-podroid
+          sh -n build-rootfs/build-rootfs.sh
+          sh -n build-rootfs/files/usr/local/lib/podroid/service-runner
