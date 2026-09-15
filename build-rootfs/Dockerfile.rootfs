@@ -72,10 +72,13 @@ RUN apt-get update \
 
 COPY --from=rootfs-builder / /work/rootfs
 
-# Docker/BuildKit bind-mounts /etc/resolv.conf while a build stage is running,
-# so trying to remove it inside rootfs-builder fails with EBUSY. Replace the
-# guest copy here, where it is an ordinary file under /work/rootfs.
-RUN rm -f /work/rootfs/etc/resolv.conf \
+# Docker/BuildKit bind-mounts /etc/hostname, /etc/hosts and /etc/resolv.conf
+# while a build stage is running. Writing those paths in rootfs-builder either
+# fails with EBUSY/EROFS or is not persisted. Create the guest copies here,
+# where they are ordinary files under /work/rootfs.
+RUN rm -f /work/rootfs/etc/hostname /work/rootfs/etc/hosts /work/rootfs/etc/resolv.conf \
+ && printf 'podroid\n' > /work/rootfs/etc/hostname \
+ && printf '127.0.0.1 localhost podroid\n::1 localhost ip6-localhost\n' > /work/rootfs/etc/hosts \
  && printf 'nameserver 8.8.8.8\nnameserver 1.1.1.1\n' > /work/rootfs/etc/resolv.conf \
  && rm -rf /work/rootfs/proc/* /work/rootfs/sys/* /work/rootfs/dev/* \
            /work/rootfs/run/* /work/rootfs/tmp/* /work/rootfs/var/tmp/* \
