@@ -33,8 +33,8 @@ Usage: $0 [command] [options]
 Commands:
   all           Build everything (Kernel, Initramfs, Rootfs, QEMU, APK)
   kernel        Build custom kernel only (podroid_kernel.config + Linux source)
-  initramfs     Build custom kernel + Alpine VM initramfs (vmlinuz + initrd)
-  rootfs        Build Alpine rootfs squashfs (alpine-rootfs.squashfs)
+  initramfs     Build custom kernel + bootstrap initramfs (vmlinuz + initrd)
+  rootfs        Build Ubuntu 26.04 rootfs squashfs (legacy asset filename retained)
   qemu          Build QEMU + podroid-bridge + podroid-launcher
   apk           Build the Android APK (also builds libtermux.so via Gradle NDK)
   deploy        Build APK, uninstall old version, and install to device
@@ -105,7 +105,7 @@ build_kernel() {
 build_initramfs() {
     local kernel_ver
     kernel_ver=$(grep -E '^podroidKernelVersion=' "${SCRIPT_DIR}/gradle.properties" | cut -d= -f2)
-    log "Building custom kernel + Alpine Initramfs (Docker)..."
+    log "Building custom kernel + bootstrap initramfs (Docker)..."
     docker build --network=host \
         --build-arg "KERNEL_VERSION=${kernel_ver}" \
         -t podroid-builder --target packer "$SCRIPT_DIR"
@@ -121,7 +121,7 @@ build_initramfs() {
 }
 
 build_rootfs() {
-    log "Building Alpine rootfs squashfs..."
+    log "Building Ubuntu 26.04 LTS rootfs squashfs..."
     local sysver
     sysver=$(grep -E '^[[:space:]]*versionCode[[:space:]]*=' "${SCRIPT_DIR}/app/build.gradle.kts" | grep -oE '[0-9]+' | head -1)
     docker build -f "${SCRIPT_DIR}/build-rootfs/Dockerfile.rootfs" \
@@ -129,7 +129,7 @@ build_rootfs() {
         --build-arg "SYSTEM_VERSION=${sysver:-0}" \
         --output type=local,dest="${ASSETS}" \
         "${SCRIPT_DIR}/build-rootfs/"
-    success "Built ${ASSETS}/alpine-rootfs.squashfs ($(du -h "${ASSETS}/alpine-rootfs.squashfs" | cut -f1)), system-version ${sysver:-0}"
+    success "Built Ubuntu rootfs at ${ASSETS}/alpine-rootfs.squashfs ($(du -h "${ASSETS}/alpine-rootfs.squashfs" | cut -f1)), system-version ${sysver:-0}"
 }
 
 build_qemu() {
@@ -177,26 +177,21 @@ run_boot_test() {
     
     log "Starting Automated Boot Test..."
     
-    # Check for device
     adb devices 2>/dev/null | grep -q 'device$' || error "No device connected via ADB."
     
-    # Build and Install
     build_apk
     deploy_apk
     
-    # Reset State
     log "Resetting VM storage for clean test..."
     adb shell am force-stop "$pkg" 2>/dev/null || true
     adb shell run-as "$pkg" rm -f files/storage.img 2>/dev/null || true
     adb shell run-as "$pkg" rm -f files/console.log 2>/dev/null || true
     
-    # Launch
     log "Launching App..."
     adb shell am start -n "$pkg/$activity" >/dev/null 2>&1
     
     echo -e "${YELLOW}>>> PLEASE PRESS 'Start Podman' IN THE APP NOW <<<${NC}"
     
-    # Poll console log
     log "Waiting for VM to boot (timeout: ${timeout}s)..."
     local boot_ok=false
     for i in $(seq 1 "$timeout"); do
@@ -215,13 +210,12 @@ run_boot_test() {
         error "VM failed to boot within ${timeout}s. Check 'adb logcat'."
     fi
     
-    # Validation
     log "Validating boot output..."
     local console
     console=$(adb shell run-as "$pkg" cat files/console.log 2>/dev/null || echo "")
     
     local errors=0
-    local checks=("Podroid - Alpine Linux" "IP:" "Ready!" "Loading kernel modules")
+    local checks=("Loading kernel modules" "Configuring containers" "Network found" "Ready!")
     for check in "${checks[@]}"; do
         if echo "$console" | grep -q "$check"; then
             success "Check passed: $check"

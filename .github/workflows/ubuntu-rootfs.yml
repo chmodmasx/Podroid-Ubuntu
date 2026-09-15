@@ -1,0 +1,45 @@
+name: Ubuntu rootfs diagnostics
+
+# The debug-APK workflow now builds and validates the Ubuntu rootfs first, so a
+# second automatic rootfs build only duplicated ARM64 emulation work and made
+# iteration harder to read. Keep this workflow as an explicit diagnostic tool.
+on:
+  workflow_dispatch:
+
+jobs:
+  rootfs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate shell syntax
+        run: |
+          bash -n build-all.sh
+          sh -n build-rootfs/build-rootfs.sh
+          sh -n build-rootfs/files/usr/local/lib/podroid/service-runner
+          sh -n build-rootfs/files/usr/local/sbin/podroid-migrate-rootfs
+
+      - name: Enable ARM64 emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Build Ubuntu rootfs
+        run: ./build-all.sh rootfs
+
+      - name: Inspect SquashFS
+        run: |
+          set -euxo pipefail
+          command -v unsquashfs >/dev/null || { sudo apt-get update; sudo apt-get install -y squashfs-tools; }
+          ROOTFS=app/src/main/assets/alpine-rootfs.squashfs
+          test -s "$ROOTFS"
+          unsquashfs -cat "$ROOTFS" etc/os-release | grep -q '^ID=ubuntu$'
+          unsquashfs -cat "$ROOTFS" etc/os-release | grep -q '^VERSION_ID="26.04"$'
+          unsquashfs -cat "$ROOTFS" etc/podroid/rootfs-id | grep -q '^ubuntu-26.04$'
+          ! unsquashfs -ll "$ROOTFS" | grep -q 'etc/alpine-release'
+          unsquashfs -ll "$ROOTFS" | grep -q 'usr/local/bin/podroid-vsock-agent'
+          unsquashfs -ll "$ROOTFS" | grep -q 'usr/local/bin/podroid-hostd'
+          unsquashfs -ll "$ROOTFS" | grep -q 'usr/local/bin/podroid-overlay-normalize'

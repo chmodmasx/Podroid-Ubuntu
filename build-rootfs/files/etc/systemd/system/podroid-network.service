@@ -1,0 +1,10 @@
+[Unit]
+Description=Podroid VM networking
+Requires=podroid-bootstrap.service
+After=podroid-bootstrap.service
+Before=network-online.target dropbear.service docker.service lxc-net.service podroid-ready.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/podroid/service-runner /usr/local/lib/podroid/services/podroid-network start
+RemainAfterExit=yes

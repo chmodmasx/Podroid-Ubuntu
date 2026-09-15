@@ -1,0 +1,14 @@
+[Unit]
+Description=Podroid AVF Downloads share
+ConditionKernelCommandLine=podroid.backend=avf
+Requires=podroid-network.service podroid-vsock.service
+After=podroid-network.service podroid-vsock.service
+Before=podroid-ready.service
+
+[Service]
+Type=simple
+ExecStartPre=/bin/mkdir -p /mnt/downloads
+ExecStart=/usr/local/bin/podroid-vsock-agent downloads-9p
+ExecStop=-/bin/umount /mnt/downloads
+Restart=on-failure
+RestartSec=1

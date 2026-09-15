@@ -1,9 +1,18 @@
 # build-rootfs/Dockerfile.rootfs
+#
+# Ubuntu 26.04 LTS ARM64 guest rootfs for Podroid.
+# The final squashfs keeps the historical alpine-rootfs.squashfs filename.
+# Android currently treats that filename as an internal asset ABI.
 
-# ── Stage 1: cross-compile podroid-vsock-agent (musl-static aarch64) ────────
-# Uses qemu-user under the hood — no separate cross-toolchain needed.
-FROM --platform=linux/arm64 alpine:3.24 AS vsock-builder
-RUN apk add --no-cache musl-dev gcc make linux-headers
+# ── Stage 1: build Podroid guest helpers for ARM64 ───────────────────────────
+FROM --platform=linux/arm64 ubuntu:26.04 AS native-builder
+ENV DEBIAN_FRONTEND=noninteractive
+RUN sed -i 's/^Components: .*/Components: main universe/' /etc/apt/sources.list.d/ubuntu.sources \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends \
+      build-essential linux-libc-dev ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /work
 COPY vsock-agent /work/vsock-agent
 RUN cd /work/vsock-agent && make CC=gcc
@@ -12,38 +21,81 @@ RUN cd /work/host-bridge && make CC=gcc
 COPY overlay-normalize /work/overlay-normalize
 RUN cd /work/overlay-normalize && make CC=gcc
 
-# ── Stage 2: build the Alpine rootfs squashfs ───────────────────────────────
-FROM alpine:3.24 AS builder
-
-ARG ALPINE_RELEASE=3.24.1
-ARG ALPINE_ARCH=aarch64
-
-RUN apk add --no-cache curl squashfs-tools tar openssl libcap-utils
-
-WORKDIR /work
-RUN curl -L -o minirootfs.tar.gz \
-    "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_RELEASE%.*}/releases/${ALPINE_ARCH}/alpine-minirootfs-${ALPINE_RELEASE}-${ALPINE_ARCH}.tar.gz" \
- && mkdir rootfs \
- && tar -xzf minirootfs.tar.gz -C rootfs \
- && rm minirootfs.tar.gz
-
-# Pull in the vsock-agent binary built in stage 1.
-COPY --from=vsock-builder /work/vsock-agent/podroid-vsock-agent /work/rootfs/usr/local/bin/podroid-vsock-agent
-COPY --from=vsock-builder /work/host-bridge/podroid-hostd /work/rootfs/usr/local/bin/podroid-hostd
-COPY --from=vsock-builder /work/overlay-normalize/podroid-overlay-normalize /work/rootfs/usr/local/bin/podroid-overlay-normalize
-
+# ── Stage 2: assemble the Ubuntu ARM64 guest filesystem ─────────────────────
+FROM --platform=linux/arm64 ubuntu:26.04 AS rootfs-builder
 ARG SYSTEM_VERSION=0
 ENV SYSTEM_VERSION=${SYSTEM_VERSION}
+ENV UBUNTU_VERSION=26.04
+ENV DEBIAN_FRONTEND=noninteractive
 
-ENV ALPINE_VERSION=${ALPINE_RELEASE}
+# Universe contains several container and desktop packages Podroid needs.
+RUN sed -i 's/^Components: .*/Components: main universe/' /etc/apt/sources.list.d/ubuntu.sources \
+ && printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d \
+ && chmod +x /usr/sbin/policy-rc.d \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends \
+      systemd systemd-sysv dbus \
+      bash login passwd adduser sudo \
+      podman docker.io docker-compose-v2 \
+      lxc lxc-templates \
+      crun fuse-overlayfs slirp4netns \
+      netavark aardvark-dns \
+      iptables nftables bridge-utils iproute2 iputils-ping \
+      dropbear openssh-sftp-server \
+      curl ca-certificates \
+      uidmap libcap2-bin \
+      gzip xz-utils \
+      tigervnc-standalone-server \
+      pulseaudio pulseaudio-utils \
+      xfonts-base fonts-dejavu-core \
+      procps kmod util-linux e2fsprogs udhcpc hostname fastfetch \
+ && rm -f /usr/sbin/policy-rc.d \
+ && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+
+COPY --from=native-builder /work/vsock-agent/podroid-vsock-agent /usr/local/bin/podroid-vsock-agent
+COPY --from=native-builder /work/host-bridge/podroid-hostd /usr/local/bin/podroid-hostd
+COPY --from=native-builder /work/overlay-normalize/podroid-overlay-normalize /usr/local/bin/podroid-overlay-normalize
+
 COPY files /work/files
 COPY build-rootfs.sh /work/build-rootfs.sh
-RUN chmod +x /work/build-rootfs.sh && /work/build-rootfs.sh
+RUN chmod +x /work/build-rootfs.sh \
+ && /work/build-rootfs.sh \
+ && rm -rf /work/files /work/build-rootfs.sh \
+ && rm -rf /tmp/* /var/tmp/*
 
+# ── Stage 3: pack outside the ARM64 stage ───────────────────────────────────
+FROM ubuntu:26.04 AS packer
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends squashfs-tools \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY --from=rootfs-builder / /work/rootfs
+
+# Docker/BuildKit bind-mounts /etc/hostname, /etc/hosts and /etc/resolv.conf
+# while a build stage is running. Writing those paths in rootfs-builder either
+# fails with EBUSY/EROFS or is not persisted. Create the guest copies here,
+# where they are ordinary files under /work/rootfs.
+RUN rm -f /work/rootfs/etc/hostname /work/rootfs/etc/hosts /work/rootfs/etc/resolv.conf \
+ && printf 'podroid\n' > /work/rootfs/etc/hostname \
+ && printf '127.0.0.1 localhost podroid\n::1 localhost ip6-localhost\n' > /work/rootfs/etc/hosts \
+ && printf 'nameserver 8.8.8.8\nnameserver 1.1.1.1\n' > /work/rootfs/etc/resolv.conf \
+ && rm -rf /work/rootfs/proc/* /work/rootfs/sys/* /work/rootfs/dev/* \
+           /work/rootfs/run/* /work/rootfs/tmp/* /work/rootfs/var/tmp/* \
+ && mkdir -p /work/rootfs/proc /work/rootfs/sys /work/rootfs/dev \
+             /work/rootfs/run /work/rootfs/tmp /work/rootfs/var/tmp \
+ && chmod 1777 /work/rootfs/tmp /work/rootfs/var/tmp \
+ && test -x /work/rootfs/usr/lib/systemd/systemd \
+ && test -x /work/rootfs/usr/local/bin/podroid-vsock-agent \
+ && test -x /work/rootfs/usr/local/bin/podroid-hostd \
+ && test -x /work/rootfs/usr/local/bin/podroid-overlay-normalize \
+ && grep -q '^ID=ubuntu$' /work/rootfs/etc/os-release \
+ && grep -q '^ubuntu-26.04$' /work/rootfs/etc/podroid/rootfs-id
+
+# Keep the legacy asset filename until the Android asset ABI is renamed.
 RUN mksquashfs /work/rootfs /work/alpine-rootfs.squashfs \
     -comp zstd -Xcompression-level 19 -all-root -noappend
-# (No -no-xattrs: rootless podman's newuidmap/newgidmap need their
-# file capabilities preserved; they're stored as security.capability xattr.)
+# Do not use -no-xattrs. newuidmap/newgidmap capabilities must survive.
 
 FROM scratch AS export
-COPY --from=builder /work/alpine-rootfs.squashfs /alpine-rootfs.squashfs
+COPY --from=packer /work/alpine-rootfs.squashfs /alpine-rootfs.squashfs

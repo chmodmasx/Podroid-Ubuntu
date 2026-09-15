@@ -1,0 +1,9 @@
+[Unit]
+Description=Podroid ready marker
+Requires=podroid-network.service
+After=podroid-network.service podroid-resize.service podroid-hostd.service podroid-vsock.service podroid-downloads.service podroid-xvnc.service podroid-pulseaudio.service dropbear.service docker.service lxc-net.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/podroid/service-runner /usr/local/lib/podroid/services/podroid-ready start
+RemainAfterExit=yes

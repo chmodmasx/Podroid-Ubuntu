@@ -1,0 +1,10 @@
+[Unit]
+Description=Podroid VM bootstrap
+Requires=podroid-migrate.service
+After=podroid-migrate.service local-fs.target
+Before=podroid-network.service docker.service lxc-net.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/podroid/service-runner /usr/local/lib/podroid/services/podroid-bootstrap start
+RemainAfterExit=yes
