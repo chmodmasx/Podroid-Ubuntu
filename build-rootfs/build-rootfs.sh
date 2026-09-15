@@ -93,11 +93,9 @@ events_logger = "file"
 EOF
 
 # ── Identity and login banner ────────────────────────────────────────────────
-printf 'podroid\n' > /etc/hostname
-cat > /etc/hosts <<'EOF'
-127.0.0.1 localhost podroid
-::1 localhost ip6-localhost
-EOF
+# Docker/BuildKit bind-mounts /etc/hostname, /etc/hosts and /etc/resolv.conf
+# during RUN steps. Their guest copies are written later by the native packer
+# stage so the values are both writable and actually persisted in SquashFS.
 cat > /etc/issue <<'EOF'
 Welcome to Podroid (Ubuntu 26.04 LTS)
 Kernel \r on \m (\l)
