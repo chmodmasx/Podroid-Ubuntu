@@ -57,6 +57,11 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # setup-android@v3 still defaults to the retired legacy "tools"
+          # package. Current Google repositories no longer publish it, so let
+          # the action install its command-line tools plus platform-tools only.
+          packages: platform-tools
 
       - name: Install Android build dependencies
         run: |
