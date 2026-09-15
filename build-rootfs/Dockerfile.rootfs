@@ -72,12 +72,22 @@ RUN apt-get update \
 
 COPY --from=rootfs-builder / /work/rootfs
 
-# Docker build stages may leave runtime-only directories populated.
-RUN rm -rf /work/rootfs/proc/* /work/rootfs/sys/* /work/rootfs/dev/* \
+# Docker/BuildKit bind-mounts /etc/resolv.conf while a build stage is running,
+# so trying to remove it inside rootfs-builder fails with EBUSY. Replace the
+# guest copy here, where it is an ordinary file under /work/rootfs.
+RUN rm -f /work/rootfs/etc/resolv.conf \
+ && printf 'nameserver 8.8.8.8\nnameserver 1.1.1.1\n' > /work/rootfs/etc/resolv.conf \
+ && rm -rf /work/rootfs/proc/* /work/rootfs/sys/* /work/rootfs/dev/* \
            /work/rootfs/run/* /work/rootfs/tmp/* /work/rootfs/var/tmp/* \
  && mkdir -p /work/rootfs/proc /work/rootfs/sys /work/rootfs/dev \
              /work/rootfs/run /work/rootfs/tmp /work/rootfs/var/tmp \
- && chmod 1777 /work/rootfs/tmp /work/rootfs/var/tmp
+ && chmod 1777 /work/rootfs/tmp /work/rootfs/var/tmp \
+ && test -x /work/rootfs/usr/lib/systemd/systemd \
+ && test -x /work/rootfs/usr/local/bin/podroid-vsock-agent \
+ && test -x /work/rootfs/usr/local/bin/podroid-hostd \
+ && test -x /work/rootfs/usr/local/bin/podroid-overlay-normalize \
+ && grep -q '^ID=ubuntu$' /work/rootfs/etc/os-release \
+ && grep -q '^ubuntu-26.04$' /work/rootfs/etc/podroid/rootfs-id
 
 # Keep the legacy asset filename until the Android asset ABI is renamed.
 RUN mksquashfs /work/rootfs /work/alpine-rootfs.squashfs \

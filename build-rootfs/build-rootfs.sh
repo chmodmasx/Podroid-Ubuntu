@@ -143,13 +143,13 @@ Requires=podroid-bootstrap.service podroid-network.service
 After=podroid-bootstrap.service podroid-network.service
 EOF
 
-# Podroid configures networking itself.
+# Podroid configures networking itself. Do not replace /etc/resolv.conf here:
+# Docker/BuildKit bind-mounts it in RUN steps, so unlinking it returns EBUSY.
+# Dockerfile.rootfs writes the guest resolver later from the native packer stage.
 ln -sf /dev/null /etc/systemd/system/systemd-networkd.service
 ln -sf /dev/null /etc/systemd/system/systemd-networkd.socket
 ln -sf /dev/null /etc/systemd/system/systemd-networkd-wait-online.service
 ln -sf /dev/null /etc/systemd/system/systemd-resolved.service
-rm -f /etc/resolv.conf
-printf 'nameserver 8.8.8.8\nnameserver 1.1.1.1\n' > /etc/resolv.conf
 
 # Prevent systemd-getty-generator from consuming Podroid's serial boot channel.
 ln -sf /dev/null /etc/systemd/system/serial-getty@ttyAMA0.service

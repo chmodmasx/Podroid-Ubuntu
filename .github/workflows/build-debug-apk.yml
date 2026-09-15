@@ -8,6 +8,10 @@ on:
       - '**'
   workflow_dispatch:
 
+concurrency:
+  group: ubuntu-debug-apk-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-apk:
     runs-on: ubuntu-24.04
@@ -21,6 +25,28 @@ jobs:
         uses: docker/setup-qemu-action@v3
         with:
           platforms: arm64
+
+      - name: Make build scripts executable
+        run: chmod +x gradlew build-all.sh init-podroid build-rootfs/build-rootfs.sh
+
+      # Build the part we are actively changing first. If Ubuntu rootfs creation
+      # fails, the job stops before spending time installing Java/Android SDK.
+      - name: Build Ubuntu rootfs
+        run: ./build-all.sh rootfs
+
+      - name: Validate Ubuntu rootfs
+        run: |
+          set -euxo pipefail
+          command -v unsquashfs >/dev/null || { sudo apt-get update; sudo apt-get install -y squashfs-tools; }
+          ROOTFS=app/src/main/assets/alpine-rootfs.squashfs
+          test -s "$ROOTFS"
+          unsquashfs -cat "$ROOTFS" etc/os-release | grep -q '^ID=ubuntu$'
+          unsquashfs -cat "$ROOTFS" etc/os-release | grep -q '^VERSION_ID="26.04"$'
+          unsquashfs -cat "$ROOTFS" etc/podroid/rootfs-id | grep -q '^ubuntu-26.04$'
+          ! unsquashfs -ll "$ROOTFS" | grep -q 'etc/alpine-release'
+          unsquashfs -ll "$ROOTFS" | grep -q 'usr/local/bin/podroid-vsock-agent'
+          unsquashfs -ll "$ROOTFS" | grep -q 'usr/local/bin/podroid-hostd'
+          unsquashfs -ll "$ROOTFS" | grep -q 'usr/local/bin/podroid-overlay-normalize'
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -36,9 +62,6 @@ jobs:
         run: |
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager 'platforms;android-36.1' 'build-tools;36.0.0' 'ndk;27.2.12479018'
-
-      - name: Make build scripts executable
-        run: chmod +x gradlew build-all.sh init-podroid
 
       - name: Reuse unchanged upstream v1.2.8 VM binaries
         run: |
@@ -67,9 +90,6 @@ jobs:
           test -s app/src/main/assets/vmlinuz-virt
           test -s app/src/main/assets/initrd.img
           test -s app/src/main/jniLibs/arm64-v8a/libqemu-system-aarch64.so
-
-      - name: Build Ubuntu rootfs
-        run: ./build-all.sh rootfs
 
       - name: Build debug APK
         run: ./gradlew --no-daemon assembleDebug
